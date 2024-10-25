@@ -1,0 +1,59 @@
+name: Docker CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: 3.9
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run Django tests
+        run: python manage.py test
+
+      - name: Build Docker image
+        run: docker build -t financial-backend .
+
+      - name: Push to DockerHub
+        env:
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+          DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+        run: |
+          echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+          docker tag financial-backend:latest <your-dockerhub-username>/financial-backend:latest
+          docker push <your-dockerhub-username>/financial-backend:latest
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to AWS EC2
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          echo "$SSH_PRIVATE_KEY" > private_key.pem
+          chmod 600 private_key.pem
+
+          ssh -i "private_key.pem" ubuntu@$SERVER_HOST << 'EOF'
+            docker pull <your-dockerhub-username>/financial-backend:latest
+            docker stop financial-backend || true
+            docker rm financial-backend || true
+            docker run -d -p 8000:8000 --name financial-backend <your-dockerhub-username>/financial-backend:latest
+          EOF
